@@ -7,15 +7,14 @@
   --foreground: #171717;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   color: var(--foreground);
   background: var(--background);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Hide Static route element */
+[data-nextjs-router-announcer],
+[data-nextjs-scroll-focus-boundary] {
+  display: none !important;
 }
