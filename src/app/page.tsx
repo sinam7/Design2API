@@ -1,9 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { figmaClient } from '@/lib/figma/client';
 import { FigmaNode } from '@/lib/figma/types';
 import Link from 'next/link';
+import Image from 'next/image';
+import { SchemaResponse } from '@/lib/types/schema';
 
 // 이미지 캐시 인터페이스
 interface ImageCache {
@@ -16,18 +18,31 @@ interface ImageCache {
 // 스키마 캐시 인터페이스
 interface SchemaCache {
   [key: string]: {
-    schema: any;
+    schema: SchemaResponse;
     timestamp: number;
   };
 }
 
 const CACHE_DURATION = 1000 * 60 * 60; // 1시간
 
+// 타입 정의 추가
+interface FigmaPageData {
+  document: {
+    children: FigmaPage[];
+  };
+}
+
+interface FigmaPage {
+  id: string;
+  name: string;
+  children?: FigmaNode[];
+}
+
 export default function Home() {
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useState<FigmaPageData | null>(null);
   const [selectedNode, setSelectedNode] = useState<FigmaNode | null>(null);
   const [nodeImage, setNodeImage] = useState<string | null>(null);
-  const [schema, setSchema] = useState<any>(null);
+  const [schema, setSchema] = useState<SchemaResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [inferenceLoading, setInferenceLoading] = useState<boolean>(false);
   const [imageCache, setImageCache] = useState<ImageCache>({});
@@ -40,12 +55,35 @@ export default function Home() {
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const loadFigmaData = useCallback(async () => {
+    if (!settings) return;
+    
+    try {
+      setError(null);
+      const fileData = await figmaClient.getFile();
+      setData(fileData);
+    } catch (error) {
+      if (error instanceof Error) {
+        console.error('Failed to load Figma data:', error);
+        if (error.message.includes('401')) {
+          setError('Figma Access Token이 올바르지 않습니다. 설정에서 확인해주세요.');
+        } else if (error.message.includes('404')) {
+          setError('Figma 파일을 찾을 수 없습니다. 파일 ID가 올바른지 확인해주세요.');
+        } else {
+          setError('Figma 파일을 불러오는데 실패했습니다. 설정을 확인해주세요.');
+        }
+        
+        setData(null);
+      }
+    }
+  }, [settings]);
+
   useEffect(() => {
     if (settings) {
       figmaClient.setCredentials(settings.figmaAccessToken, settings.figmaFileId);
       loadFigmaData();
     }
-  }, [settings]);
+  }, [settings, loadFigmaData]);
 
   useEffect(() => {
     const savedSettings = localStorage.getItem('design2api_settings');
@@ -55,25 +93,50 @@ export default function Home() {
       figmaClient.setCredentials(parsedSettings.figmaAccessToken, parsedSettings.figmaFileId);
     }
     
-    // LocalStorage에서 캐시 로드
-    const loadCache = (key: string) => {
+    // 이미지 캐시 로드
+    const loadImageCache = (key: string): ImageCache => {
       const cachedData = localStorage.getItem(key);
       if (cachedData) {
         const parsedCache = JSON.parse(cachedData);
         const now = Date.now();
-        const validCache = Object.entries(parsedCache).reduce((acc, [key, value]: [string, any]) => {
-          if (now - value.timestamp < CACHE_DURATION) {
-            acc[key] = value;
+        const validCache = Object.entries(parsedCache).reduce((acc, [key, value]) => {
+          const cacheValue = value as { url: string; timestamp: number };
+          if (now - cacheValue.timestamp < CACHE_DURATION) {
+            acc[key] = {
+              url: cacheValue.url,
+              timestamp: cacheValue.timestamp
+            };
           }
           return acc;
-        }, {} as any);
+        }, {} as ImageCache);
         return validCache;
       }
       return {};
     };
 
-    setImageCache(loadCache('figmaImageCache'));
-    setSchemaCache(loadCache('figmaSchemaCache'));
+    // 스키마 캐시 로드
+    const loadSchemaCache = (key: string): SchemaCache => {
+      const cachedData = localStorage.getItem(key);
+      if (cachedData) {
+        const parsedCache = JSON.parse(cachedData);
+        const now = Date.now();
+        const validCache = Object.entries(parsedCache).reduce((acc, [key, value]) => {
+          const cacheValue = value as { schema: SchemaResponse; timestamp: number };
+          if (now - cacheValue.timestamp < CACHE_DURATION) {
+            acc[key] = {
+              schema: cacheValue.schema,
+              timestamp: cacheValue.timestamp
+            };
+          }
+          return acc;
+        }, {} as SchemaCache);
+        return validCache;
+      }
+      return {};
+    };
+
+    setImageCache(loadImageCache('figmaImageCache'));
+    setSchemaCache(loadSchemaCache('figmaSchemaCache'));
   }, []);
 
   // 캐시 저장
@@ -89,29 +152,6 @@ export default function Home() {
     }
   }, [schemaCache]);
 
-  const loadFigmaData = async () => {
-    if (!settings) return;
-    
-    try {
-      setError(null);
-      const fileData = await figmaClient.getFile();
-      setData(fileData);
-    } catch (error: any) {
-      console.error('Failed to load Figma data:', error);
-      
-      // API 응답 상태 코드로 에러 구분
-      if (error.message.includes('401')) {
-        setError('Figma Access Token이 올바르지 않습니다. 설정에서 확인해주세요.');
-      } else if (error.message.includes('404')) {
-        setError('Figma 파일을 찾을 수 없습니다. 파일 ID가 올바른지 확인해주세요.');
-      } else {
-        setError('Figma 파일을 불러오는데 실패했습니다. 설정을 확인해주세요.');
-      }
-      
-      setData(null);
-    }
-  };
-
   const getImageFromCache = (nodeId: string): string | null => {
     const cached = imageCache[nodeId];
     if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
@@ -120,7 +160,7 @@ export default function Home() {
     return null;
   };
 
-  const getSchemaFromCache = (nodeId: string): any | null => {
+  const getSchemaFromCache = (nodeId: string): SchemaResponse | null => {
     const cached = schemaCache[nodeId];
     if (cached && Date.now() - cached.timestamp < CACHE_DURATION) {
       return cached.schema;
@@ -185,10 +225,11 @@ export default function Home() {
         }),
       });
 
-      const data = await response.json();
+      const data = (await response.json()) as SchemaResponse;
 
       if (!response.ok) {
-        throw new Error(data.error || 'Schema generation failed');
+        const errorMessage = data.error || 'Schema generation failed';
+        throw new Error(errorMessage);
       }
 
       setSchema(data);
@@ -199,9 +240,11 @@ export default function Home() {
           timestamp: Date.now()
         }
       }));
-    } catch (error: any) {
-      console.error('Failed to generate schema:', error);
-      setError(error.message || 'API 스키마 생성에 실패했습니다.');
+    } catch (error: unknown) {
+      if (error instanceof Error) {
+        console.error('Failed to generate schema:', error);
+        setError(error.message || 'API 스키마 생성에 실패했습니다.');
+      }
     } finally {
       setInferenceLoading(false);
     }
@@ -229,7 +272,7 @@ export default function Home() {
             </div>
           ) : data ? (
             <div className="space-y-2">
-              {data.document.children.map((page: any) => (
+              {data.document.children.map((page: FigmaPage) => (
                 <div key={page.id}>
                   <h3 className="font-medium">{page.name}</h3>
                   <div className="pl-4">
@@ -268,10 +311,12 @@ export default function Home() {
                 onClick={() => setShowImageModal(true)}
                 className="relative group"
               >
-                <img
+                <Image
                   src={nodeImage}
                   alt={selectedNode?.name || 'Selected design'}
                   className="max-w-full max-h-64 object-contain cursor-pointer"
+                  width={500}
+                  height={300}
                 />
                 <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-10 transition-all flex items-center justify-center">
                   <span className="text-transparent group-hover:text-white transition-all">
@@ -290,7 +335,10 @@ export default function Home() {
         {/* API 스키마 결과 */}
         <div className="border rounded-lg p-4 flex flex-col overflow-hidden">
           <div className="flex justify-between items-center mb-2 bg-white">
-            <h2 className="text-xl font-semibold">Generated API Schema</h2>
+            <div className="flex items-center gap-2">
+              <h2 className="text-xl font-semibold">Generated API Schema</h2>
+              <span className="text-xs text-gray-400">gpt-4o-mini-2024-07-18</span>
+            </div>
             {selectedNode && !inferenceLoading && (
               <button
                 onClick={handleGenerateSchema}
@@ -339,10 +387,12 @@ export default function Home() {
             >
               ✕
             </button>
-            <img
+            <Image
               src={nodeImage}
               alt={selectedNode?.name || 'Original design'}
               className="max-w-full max-h-[90vh] object-contain"
+              width={500}
+              height={300}
             />
           </div>
         </div>

@@ -1,22 +1,24 @@
 import { NextResponse } from 'next/server';
 import { openAIClient } from '@/lib/openai/server';
-import { FigmaNode } from '@/lib/figma/types';
 
 export async function POST(request: Request) {
   try {
     const { frameName, components, openaiApiKey } = await request.json();
 
-    console.log('Request to OpenAI:');
-    console.log('Frame Name:', frameName);
-    console.log('Components:', JSON.stringify(components, null, 2));
+    if (!openaiApiKey) {
+      return NextResponse.json(
+        { error: 'OpenAI API key is required' },
+        { status: 400 }
+      );
+    }
+
+    // API 키 설정
+    openAIClient.setApiKey(openaiApiKey);
 
     const response = await openAIClient.generateResponseSchema(
       frameName,
       components
     );
-
-    console.log('\nResponse Content:');
-    console.log(response);
 
     return NextResponse.json(response);
   } catch (error) {

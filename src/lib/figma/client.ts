@@ -1,5 +1,13 @@
 import { FigmaNode, FigmaNodeType } from './types';
 
+interface FigmaComponents {
+  [key: string]: {
+    key: string;
+    name: string;
+    description?: string;
+  };
+}
+
 export interface FigmaFile {
   document: {
     id: string;
@@ -7,7 +15,7 @@ export interface FigmaFile {
     type: FigmaNodeType;
     children: FigmaNode[];
   };
-  components: { [key: string]: any };
+  components: FigmaComponents;
   schemaVersion: number;
   name: string;
 }
@@ -74,7 +82,9 @@ class FigmaClient {
     return data.images[nodeId];
   }
 
-  async getFileNodes(nodeIds: string[]): Promise<any> {
+  async getFileNodes(nodeIds: string[]): Promise<{
+    nodes: Record<string, FigmaNode>;
+  }> {
     if (!this.accessToken || !this.fileId) {
       throw new Error('Figma credentials not set. Please configure them in settings.');
     }

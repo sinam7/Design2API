@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { FigmaNode } from '../figma/types';
+import { SchemaResponse } from '../types/schema';
 
 interface ModelConfig {
   model: 'gpt-4o-mini-2024-07-18';
@@ -34,7 +35,7 @@ class OpenAIClient {
     frameName: string,
     components: FigmaNode[],
     additionalContext?: string
-  ): Promise<any> {
+  ): Promise<SchemaResponse> {
     try {
       // 컴포넌트 분석을 위한 전처리
       const componentAnalysis = components.map(comp => ({

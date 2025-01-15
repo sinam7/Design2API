@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import { FigmaNode } from '../figma/types';
+import { SchemaResponse } from '../types/schema';
 
 interface ModelConfig {
   model: 'gpt-4o-mini-2024-07-18';
@@ -14,27 +15,29 @@ const DEFAULT_CONFIG: ModelConfig = {
 };
 
 class OpenAIClient {
-  private client: OpenAI;
+  private client: OpenAI | null = null;
   private config: ModelConfig;
 
   constructor(config: Partial<ModelConfig> = {}) {
-    const apiKey = process.env.OPENAI_API_KEY;
+    this.config = { ...DEFAULT_CONFIG, ...config };
+  }
+
+  setApiKey(apiKey: string) {
     if (!apiKey) {
       throw new Error('OpenAI API key is required');
     }
-
-    this.client = new OpenAI({
-      apiKey,
-    });
-
-    this.config = { ...DEFAULT_CONFIG, ...config };
+    this.client = new OpenAI({ apiKey });
   }
 
   async generateResponseSchema(
     frameName: string,
     components: FigmaNode[],
     additionalContext?: string
-  ): Promise<any> {
+  ): Promise<SchemaResponse> {
+    if (!this.client) {
+      throw new Error('OpenAI client is not initialized. Please set API key first.');
+    }
+
     try {
       const componentAnalysis = components.map(comp => ({
         name: comp.name,
