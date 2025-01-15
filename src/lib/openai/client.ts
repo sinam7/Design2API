@@ -1,6 +1,8 @@
 import OpenAI from 'openai';
 import { FigmaNode } from '../figma/types';
 import { SchemaResponse } from '../types/schema';
+import { cookies } from 'next/headers';
+import { decrypt } from '@/lib/utils/encryption';
 
 interface ModelConfig {
   model: 'gpt-4o-mini-2024-07-18';
@@ -15,20 +17,18 @@ const DEFAULT_CONFIG: ModelConfig = {
 };
 
 class OpenAIClient {
-  private client: OpenAI;
+  private client!: OpenAI;
   private config: ModelConfig;
 
   constructor(config: Partial<ModelConfig> = {}) {
-    const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) {
-      throw new Error('OpenAI API key is required');
-    }
-
-    this.client = new OpenAI({
-      apiKey,
-    });
-
     this.config = { ...DEFAULT_CONFIG, ...config };
+  }
+
+  async getClient() {
+    if (!this.client) {
+      this.client = await getOpenAIClient();
+    }
+    return this.client;
   }
 
   async generateResponseSchema(
@@ -37,6 +37,7 @@ class OpenAIClient {
     additionalContext?: string
   ): Promise<SchemaResponse> {
     try {
+      const client = await this.getClient();
       // 컴포넌트 분석을 위한 전처리
       const componentAnalysis = components.map(comp => ({
         name: comp.name,
@@ -103,7 +104,7 @@ Response Format:
 Consider the visual hierarchy and relationships between components when generating the data structure.
 Respond ONLY with the JSON, no explanations or additional text.`;
 
-      const response = await this.client.chat.completions.create({
+      const response = await client.chat.completions.create({
         model: this.config.model,
         messages: [
           {
@@ -139,4 +140,29 @@ export const openAIClient = new OpenAIClient();
 export const openAIClientTest = new OpenAIClient({
   model: 'gpt-4o-mini-2024-07-18',
   temperature: 0.3,
-}); 
+});
+
+export async function getOpenAIClient() {
+  try {
+    const cookieStore = await cookies();
+    const settingsCookie = cookieStore.get('user_settings');
+    
+    if (!settingsCookie?.value) {
+      throw new Error('API 설정이 필요합니다.');
+    }
+
+    const decryptedSettings = decrypt(settingsCookie.value);
+    const settings = JSON.parse(decryptedSettings);
+    
+    if (!settings.openaiApiKey) {
+      throw new Error('OpenAI API 키가 설정되지 않았습니다.');
+    }
+
+    return new OpenAI({
+      apiKey: settings.openaiApiKey,
+    });
+  } catch (error) {
+    console.error('API 설정을 불러올 수 없습니다.', error);
+    throw new Error('API 설정을 불러올 수 없습니다.');
+  }
+} 
